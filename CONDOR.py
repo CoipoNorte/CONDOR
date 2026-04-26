@@ -1,5 +1,10 @@
 """
-CONDOR v2.3 — Automatizador de proyectos desde .md
+CONDOR v2.4 — Automatizador de proyectos desde .md
++ Botón PROMPT para copiar instrucciones al portapapeles
++ Botón PEGAR para pegar .md desde portapapeles
++ Acción REEMPLAZAR para sustituir líneas específicas
++ Icono personalizado y minimizar a bandeja
++ Optimizado para PCs con pocos recursos
 """
 
 import os
@@ -10,6 +15,7 @@ import tkinter as tk
 from tkinter import filedialog, scrolledtext, messagebox, ttk
 import sys
 import time
+import tempfile
 
 try:
     import pystray
@@ -40,13 +46,14 @@ ETIQUETA[ubicacion,nombre,extension,accion]
 - **ubicacion**: ruta relativa desde la raíz del proyecto (usar `.` para la raíz)
 - **nombre**: nombre del archivo sin extensión (usar `nan` si no aplica, como en comandos)
 - **extension**: extensión del archivo (js, jsx, css, html, py, cmd, etc.)
-- **accion**: una de estas → `CREAR` | `MODIFICAR` | `EJECUTAR` | `ELIMINAR`
+- **accion**: una de estas → `CREAR` | `MODIFICAR` | `EJECUTAR` | `ELIMINAR` | `REEMPLAZAR`
 
 ### Acciones:
 - **CREAR** → Crea un archivo nuevo con el contenido del bloque de código
 - **MODIFICAR** → Reemplaza TODO el contenido de un archivo existente
 - **EJECUTAR** → Ejecuta los comandos en la terminal CMD de Windows 10
 - **ELIMINAR** → Elimina el archivo indicado
+- **REEMPLAZAR** → Busca una línea exacta en el archivo y la sustituye por otra
 
 ## Ejemplos de uso
 
@@ -66,7 +73,7 @@ export default function App() {
 }
 ```
 
-### Modificar un archivo existente:
+### Modificar un archivo existente (reemplaza TODO el contenido):
 ETIQUETA[src,index,css,MODIFICAR]
 ```css
 body { margin: 0; }
@@ -77,6 +84,38 @@ ETIQUETA[src,viejo,js,ELIMINAR]
 ```bash
 eliminado
 ```
+
+### Reemplazar líneas específicas en un archivo:
+ETIQUETA[src,App,jsx,REEMPLAZAR]
+```jsx
+  return <h1>Hola</h1>
+>>>
+  return <h1>Hola Mundo</h1>
+```
+
+Se pueden hacer múltiples reemplazos en el mismo archivo usando varios bloques:
+ETIQUETA[src,App,jsx,REEMPLAZAR]
+```jsx
+import React from 'react'
+>>>
+import React, { useState } from 'react'
+```
+
+ETIQUETA[src,App,jsx,REEMPLAZAR]
+```jsx
+  const title = "viejo"
+>>>
+  const title = "nuevo"
+  const [count, setCount] = useState(0)
+```
+
+### Reglas del REEMPLAZAR:
+- Usar `>>>` en una línea sola como separador entre ORIGINAL y NUEVO
+- La parte ANTES de `>>>` es el texto exacto a buscar en el archivo
+- La parte DESPUÉS de `>>>` es el texto que lo reemplaza
+- Se busca coincidencia exacta (respetando espacios e indentación)
+- Si no se encuentra la línea original, se muestra un error
+- Un bloque REEMPLAZAR = un solo cambio. Para múltiples cambios en el mismo archivo, usar múltiples bloques REEMPLAZAR
 
 ## Reglas importantes
 
@@ -90,6 +129,8 @@ eliminado
 8. Cada bloque de código debe tener su propia ETIQUETA
 9. Trabajo con Windows 10 y CMD, los comandos deben ser compatibles
 10. Cuando se crea la estructura de carpetas, usar un solo bloque EJECUTAR con mkdir
+11. Para cambios pequeños en archivos existentes, preferir REEMPLAZAR sobre MODIFICAR
+12. MODIFICAR reescribe TODO el archivo, REEMPLAZAR solo cambia las líneas indicadas
 
 ## Ejemplo de flujo completo para un proyecto:
 
@@ -123,13 +164,20 @@ import React from 'react'
 // ... contenido
 ```
 
+ETIQUETA[src,main,jsx,REEMPLAZAR]
+```jsx
+import React from 'react'
+>>>
+import React, { StrictMode } from 'react'
+```
+
 Por favor, sigue este formato en todas tus respuestas cuando me des código para crear o modificar archivos del proyecto. Gracias!"""
 
 
 class AutoBuilder:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("CONDOR v2.3")
+        self.root.title("CONDOR v2.4")
         self.root.geometry("800x550")
         self.root.configure(bg="#0d1117")
         self.root.resizable(True, True)
@@ -153,6 +201,9 @@ class AutoBuilder:
         self.spinner_text         = ""
         self.current_spinner_line = None
 
+        # Carpeta temporal para .md pegados
+        self.temp_dir = tempfile.mkdtemp(prefix="condor_")
+
         # Icono
         self.icon_path = self._find_icon()
         if self.icon_path:
@@ -170,6 +221,7 @@ class AutoBuilder:
         self._def_btn("Y", "#f59e0b", "#d97706", fg="black")
         self._def_btn("C", "#3b82f6", "#2563eb")
         self._def_btn("W", "#64748b", "#475569")
+        self._def_btn("T", "#06b6d4", "#0891b2")
 
         self.build_ui()
 
@@ -196,20 +248,15 @@ class AutoBuilder:
         candidates.append(os.path.join(os.getcwd(), "condor.ico"))
         for p in candidates:
             if os.path.isfile(p):
-                print(f"[CONDOR] Icono: {p}")
                 return p
-        print("[CONDOR] condor.ico no encontrado")
         return None
 
     def _load_pil_image(self):
-        """Carga condor.ico como imagen PIL para pystray."""
         if self.icon_path and HAS_TRAY:
             try:
-                img = Image.open(self.icon_path).convert("RGBA").resize((64, 64))
-                return img
-            except Exception as e:
-                print(f"[CONDOR] PIL error abriendo icono: {e}")
-        # Fallback morado
+                return Image.open(self.icon_path).convert("RGBA").resize((64, 64))
+            except:
+                pass
         return Image.new("RGBA", (64, 64), (124, 58, 237, 255))
 
     # ─────────────────────────────────────────────
@@ -217,70 +264,62 @@ class AutoBuilder:
     # ─────────────────────────────────────────────
 
     def _on_close(self):
-        """Intercepta la X de la ventana."""
         if HAS_TRAY:
             self._hide_to_tray()
         else:
             self._quit_app()
 
     def _hide_to_tray(self):
-        """Oculta la ventana y lanza el icono en la bandeja."""
         self.root.withdraw()
-
-        # Si ya hay un icono corriendo no crear otro
         if self.tray_running:
             return
 
         image = self._load_pil_image()
-
         menu = pystray.Menu(
             pystray.MenuItem("Mostrar CONDOR", self._cb_mostrar, default=True),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Salir",          self._cb_salir),
+            pystray.MenuItem("Salir", self._cb_salir),
         )
-
-        self.tray_icon    = pystray.Icon("condor", image, "CONDOR v2.3", menu)
+        self.tray_icon    = pystray.Icon("condor", image, "CONDOR v2.4", menu)
         self.tray_running = True
-
-        # pystray.run() bloquea → hilo daemon
-        threading.Thread(target=self._tray_loop, daemon=True, name="TrayThread").start()
+        threading.Thread(target=self._tray_loop, daemon=True).start()
 
     def _tray_loop(self):
-        """Corre en el hilo daemon; bloquea hasta que icon.stop() se llame."""
         try:
             self.tray_icon.run()
         finally:
             self.tray_running = False
 
     def _cb_mostrar(self, icon, item):
-        """Callback del menú bandeja → restaurar ventana (debe ir al hilo Tk)."""
         self.root.after(0, self._restaurar_ventana)
 
     def _restaurar_ventana(self):
-        """Ejecutado en el hilo principal de Tk."""
         self._parar_tray()
         self.root.deiconify()
         self.root.lift()
         self.root.focus_force()
 
     def _cb_salir(self, icon, item):
-        """Callback del menú bandeja → cerrar app."""
         self.root.after(0, self._quit_app)
 
     def _parar_tray(self):
-        """Para el icono de bandeja de forma segura."""
         if self.tray_icon:
             try:
                 self.tray_icon.stop()
-            except Exception as e:
-                print(f"[CONDOR] Error parando bandeja: {e}")
+            except:
+                pass
             self.tray_icon    = None
             self.tray_running = False
 
     def _quit_app(self):
-        """Cierra completamente la aplicación."""
         self.stop_all = True
         self._parar_tray()
+        # Limpiar archivos temporales
+        try:
+            import shutil
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
+        except:
+            pass
         self.root.destroy()
 
     # ─────────────────────────────────────────────
@@ -338,6 +377,11 @@ class AutoBuilder:
         self.stop_btn.pack(side="left", padx=2)
         self.stop_btn.state(["disabled"])
 
+        # Botón PEGAR — nuevo
+        self.paste_btn = ttk.Button(row3, text="PEGAR", style="T.TButton",
+            command=self.paste_from_clipboard)
+        self.paste_btn.pack(side="left", padx=2)
+
         self.prompt_btn = ttk.Button(row3, text="PROMPT", style="W.TButton",
             command=self.copy_prompt)
         self.prompt_btn.pack(side="right", padx=2)
@@ -389,6 +433,7 @@ class AutoBuilder:
             ("white",       "#e2e8f0", False),
             ("interactive", "#f59e0b", True),
             ("spinner",     "#f59e0b", False),
+            ("replace",     "#06b6d4", True),
         ]
         for tag, color, bold in tags:
             font = ("Consolas", 9, "bold") if bold else ("Consolas", 9)
@@ -441,6 +486,55 @@ class AutoBuilder:
     # ─────────────────────────────────────────────
     # Botones
     # ─────────────────────────────────────────────
+
+    def paste_from_clipboard(self):
+        """Pega contenido del portapapeles, lo guarda como .md temporal y analiza."""
+        try:
+            clipboard = self.root.clipboard_get()
+        except tk.TclError:
+            messagebox.showerror("Error", "El portapapeles esta vacio o no tiene texto")
+            return
+
+        if not clipboard.strip():
+            messagebox.showerror("Error", "El portapapeles esta vacio")
+            return
+
+        # Verificar que tiene etiquetas
+        if "ETIQUETA[" not in clipboard:
+            confirm = messagebox.askyesno("Aviso",
+                "No se detectaron ETIQUETA[...] en el texto pegado.\n"
+                "¿Deseas continuar de todas formas?")
+            if not confirm:
+                return
+
+        # Verificar carpeta del proyecto
+        project = self.project_path.get()
+        if not project or not os.path.isdir(project):
+            messagebox.showerror("Error",
+                "Primero selecciona la carpeta DIR del proyecto")
+            return
+
+        # Guardar como archivo temporal .md
+        timestamp = int(time.time())
+        temp_file = os.path.join(self.temp_dir, f"pegado_{timestamp}.md")
+
+        try:
+            with open(temp_file, "w", encoding="utf-8") as f:
+                f.write(clipboard)
+        except Exception as e:
+            self.log_msg(f"Error guardando temporal: {e}", "err")
+            return
+
+        # Actualizar la ruta del .md
+        self.md_path.set(temp_file)
+
+        self.log_msg("Contenido pegado desde portapapeles", "ok")
+        self.log_msg(f"Guardado en: {temp_file}", "path")
+        self.log_msg(f"Tamaño: {len(clipboard)} caracteres", "info")
+        self.log_msg("")
+
+        # Analizar automáticamente
+        self.parse_md()
 
     def copy_prompt(self):
         self.root.clipboard_clear()
@@ -537,6 +631,8 @@ class AutoBuilder:
                 self.log_msg(f"  {i:02d}. EXEC{marker} -> {cmds}...", tag)
             elif inst["action"] == "ELIMINAR":
                 self.log_msg(f"  {i:02d}. DEL  -> {inst['filepath']}", "warn")
+            elif inst["action"] == "REEMPLAZAR":
+                self.log_msg(f"  {i:02d}. REPL -> {inst['filepath']}", "replace")
             else:
                 lines = inst["content"].count("\n") + 1
                 act   = "NEW " if inst["action"] == "CREAR" else "MOD "
@@ -633,6 +729,8 @@ class AutoBuilder:
                     self.create_file(project, inst)
                 elif action == "ELIMINAR":
                     self.delete_file(project, inst)
+                elif action == "REEMPLAZAR":
+                    self.replace_in_file(project, inst)
                 else:
                     self.log_msg(f"Accion desconocida: {action}", "warn")
                     continue
@@ -694,6 +792,82 @@ class AutoBuilder:
         else:
             self.log_msg(f"  NOT FOUND: {filepath}", "warn")
 
+    def replace_in_file(self, project, inst):
+        """Busca texto exacto en un archivo y lo reemplaza."""
+        filepath  = inst["filepath"]
+        content   = inst["content"]
+        full_path = os.path.join(project, filepath.replace("/", os.sep))
+
+        # Verificar que el archivo existe
+        if not os.path.exists(full_path):
+            self.log_msg(f"  REPL ERROR: archivo no existe -> {filepath}", "err")
+            return
+
+        # Separar original y reemplazo usando >>>
+        if ">>>" not in content:
+            self.log_msg(f"  REPL ERROR: falta separador >>> en bloque", "err")
+            self.log_msg(f"  Formato: linea_original >>> linea_nueva", "warn")
+            return
+
+        parts = content.split(">>>", 1)
+        original_text  = parts[0].rstrip("\n")
+        replace_text   = parts[1].lstrip("\n")
+
+        if not original_text.strip():
+            self.log_msg(f"  REPL ERROR: texto original vacio", "err")
+            return
+
+        # Leer archivo actual
+        try:
+            with open(full_path, "r", encoding="utf-8") as f:
+                file_content = f.read()
+        except Exception as e:
+            self.log_msg(f"  REPL ERROR leyendo archivo: {e}", "err")
+            return
+
+        # Buscar y reemplazar
+        if original_text not in file_content:
+            # Intentar con strip en cada línea por si hay diferencias de espacios
+            self.log_msg(f"  REPL WARN: texto exacto no encontrado", "warn")
+            self.log_msg(f"  Buscando: '{original_text[:60]}...'", "warn")
+
+            # Segundo intento: ignorar espacios al final de línea
+            original_lines  = [l.rstrip() for l in original_text.split("\n")]
+            file_lines      = file_content.split("\n")
+            file_lines_stripped = [l.rstrip() for l in file_lines]
+
+            found = False
+            for idx in range(len(file_lines_stripped) - len(original_lines) + 1):
+                chunk = file_lines_stripped[idx:idx + len(original_lines)]
+                if chunk == original_lines:
+                    # Encontrado! Reemplazar las líneas originales
+                    new_lines = file_lines[:idx] + replace_text.split("\n") + file_lines[idx + len(original_lines):]
+                    file_content = "\n".join(new_lines)
+                    found = True
+                    break
+
+            if not found:
+                self.log_msg(f"  REPL ERROR: no se encontro el texto a reemplazar", "err")
+                self.log_msg(f"  Buscado: {original_text[:80]}", "dim")
+                return
+        else:
+            # Reemplazo directo
+            file_content = file_content.replace(original_text, replace_text, 1)
+
+        # Escribir archivo modificado
+        try:
+            with open(full_path, "w", encoding="utf-8") as f:
+                f.write(file_content)
+        except Exception as e:
+            self.log_msg(f"  REPL ERROR escribiendo: {e}", "err")
+            return
+
+        orig_preview = original_text.split("\n")[0][:50]
+        repl_preview = replace_text.split("\n")[0][:50]
+        self.log_msg(f"  REPL: {filepath}", "replace")
+        self.log_msg(f"    - {orig_preview}", "dim")
+        self.log_msg(f"    + {repl_preview}", "ok")
+
     def is_interactive(self, cmd):
         cmd_lower = cmd.lower().strip()
         return any(cmd_lower.startswith(ic.lower()) for ic in INTERACTIVE_COMMANDS)
@@ -753,10 +927,11 @@ class AutoBuilder:
     # ─────────────────────────────────────────────
 
     def run(self):
-        self.log_msg("CONDOR v2.3", "head")
+        self.log_msg("CONDOR v2.4", "head")
         self.log_msg("DIR: carpeta raiz del proyecto", "info")
         self.log_msg(".MD: archivo con instrucciones", "info")
         self.log_msg("ANALIZAR → EJECUTAR | SALTAR | PARAR", "info")
+        self.log_msg("PEGAR: pega .md del portapapeles y analiza", "replace")
         self.log_msg("CMD: abrir terminal | PROMPT: copiar instrucciones IA", "info")
         if HAS_TRAY:
             self.log_msg("Cerrar ventana [X] → minimiza a bandeja del sistema", "ok")
