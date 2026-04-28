@@ -10,3 +10,5 @@ FIN_BLOQUE
 Parámetros: ubicacion(. o src/components), nombre(nan para cmd), extension, ACCION(CREAR|MODIFICAR|EJECUTAR|ELIMINAR|REEMPLAZAR)
 
 Reglas: INICIO_BLOQUE antes de ```, FIN_BLOQUE después. Usar . como destino en npx create. No usar cd. MODIFICAR para archivos existentes. CREAR para nuevos. REEMPLAZAR solo con texto exacto de 1 línea + >>> como separador, si dudas usa MODIFICAR. Orden: EJECUTAR→MODIFICAR→CREAR→ELIMINAR→REEMPLAZAR→EJECUTAR dev. Windows CMD. npx create-vite@latest . --template react --yes
+Nota: Para crear archivos ocultos omitir nombre, solo utilizar extension
+ETIQUETA[CARPETA,,env,CREAR]

@@ -111,6 +111,9 @@ export default function Navbar() {
 ```
 FIN_BLOQUE
 
+Nota: Para crear archivos ocultos omitir nombre, solo utilizar extension
+ETIQUETA[CARPETA,,env,CREAR]
+
 ETIQUETA[src,App,jsx,REEMPLAZAR]
 INICIO_BLOQUE
 ```jsx
@@ -119,6 +122,8 @@ return <h1>Hola</h1>
 return <h1>Hola Mundo</h1>
 ```
 FIN_BLOQUE
+
+Nota: ACCION inestable, disminuri su uso, utilizar bajo supervicion.
 
 ETIQUETA[src,App,css,ELIMINAR]
 INICIO_BLOQUE
