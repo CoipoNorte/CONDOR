@@ -1,16 +1,38 @@
-# CONDOR.spec
+# -*- mode: python ; coding: utf-8 -*-
+
+import os
+
 block_cipher = None
+
+# Detectar archivos
+icon_file = 'condor.ico' if os.path.exists('condor.ico') else None
+prompt_file = 'prompt.txt' if os.path.exists('prompt.txt') else None
+
+datas = []
+if icon_file:
+    datas.append((icon_file, '.'))
+if prompt_file:
+    datas.append((prompt_file, '.'))
+
+# Detectar tkinterdnd2
+try:
+    import tkinterdnd2
+    dnd_path = os.path.dirname(tkinterdnd2.__file__)
+    datas.append((dnd_path, 'tkinterdnd2'))
+except ImportError:
+    pass
 
 a = Analysis(
     ['condor.py'],
     pathex=[],
     binaries=[],
-    datas=[('condor.ico', '.')],
+    datas=datas,
     hiddenimports=[
         'pystray',
+        'pystray._win32',
         'PIL',
         'PIL.Image',
-        'PIL._imagingtk',
+        'tkinterdnd2',
     ],
     hookspath=[],
     hooksconfig={},
@@ -39,5 +61,9 @@ exe = EXE(
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
-    icon='condor.ico',
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=icon_file,
 )
