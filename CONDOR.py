@@ -1,7 +1,3 @@
-"""
-CONDOR v5.0 — Automatizador de proyectos desde .md
-"""
-
 import os
 import re
 import subprocess
@@ -59,7 +55,7 @@ PROMPT_TEXT = load_prompt()
 class AutoBuilder:
     def __init__(self):
         self.root = TkinterDnD.Tk() if HAS_DND else tk.Tk()
-        self.root.title("CONDOR v5.0")
+        self.root.title("CONDOR v5.1")
         self.root.configure(bg="#0d1117")
         self.root.resizable(True, True)
 
@@ -77,7 +73,10 @@ class AutoBuilder:
         self.auto_run       = tk.BooleanVar(value=False)
         self.backup_enabled = tk.BooleanVar(value=True)
         self.undo_stack     = []
-        self.active_process = None
+
+        # Proceso activo — clave para que SKIP y STOP funcionen
+        self.active_process      = None
+        self.active_process_lock = threading.Lock()
 
         self.tray_icon    = None
         self.tray_running = False
@@ -124,7 +123,7 @@ class AutoBuilder:
         self._setup_drag_drop()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    # ─── Helpers ───
+    # ─── Helpers ───────────────────────────────────────────────────────────
 
     def _find_file(self, filename: str):
         candidates = []
@@ -148,7 +147,7 @@ class AutoBuilder:
             return Image.new("RGBA", (64, 64), (124, 58, 237, 255))
         return None
 
-    # ─── Config ───
+    # ─── Config ────────────────────────────────────────────────────────────
 
     def _load_config(self) -> dict:
         try:
@@ -177,14 +176,53 @@ class AutoBuilder:
         self.config[key] = lst[:10]
         self._save_config()
 
-    # ─── Bandeja ───
+    # ─── Proceso activo ─────────────────────────────────────────────────────
+    # Usar lock para evitar condiciones de carrera entre hilos
+
+    def _set_process(self, proc):
+        with self.active_process_lock:
+            self.active_process = proc
+
+    def _kill_process(self):
+        """Mata el proceso activo de forma segura."""
+        with self.active_process_lock:
+            proc = self.active_process
+            self.active_process = None
+        if proc:
+            try:
+                proc.kill()
+                proc.wait(timeout=3)
+            except Exception:
+                pass
+
+    # ─── Bandeja ───────────────────────────────────────────────────────────
 
     def _on_close(self):
         self._save_config()
+        menu = tk.Menu(self.root, tearoff=0,
+            bg="#1e293b", fg="#e2e8f0",
+            activebackground="#7c3aed", activeforeground="#fff",
+            font=("Consolas", 9), relief="flat", bd=0)
+
         if HAS_TRAY:
-            self._hide_to_tray()
-        else:
-            self._quit_app()
+            menu.add_command(
+                label="  Minimizar a bandeja  ",
+                command=self._hide_to_tray)
+
+        menu.add_command(
+            label="  Cerrar CONDOR  ",
+            command=self._quit_app)
+        menu.add_separator()
+        menu.add_command(
+            label="  Cancelar  ",
+            command=menu.destroy)
+
+        x = self.root.winfo_x() + self.root.winfo_width() - 180
+        y = self.root.winfo_y() + 30
+        try:
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
 
     def _hide_to_tray(self):
         self.root.withdraw()
@@ -192,11 +230,11 @@ class AutoBuilder:
             return
         image = self._load_pil_image()
         menu  = pystray.Menu(
-            pystray.MenuItem("Show CONDOR", self._cb_show, default=True),
+            pystray.MenuItem("Abrir CONDOR", self._cb_show, default=True),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Exit", self._cb_exit),
+            pystray.MenuItem("Cerrar CONDOR", self._cb_exit),
         )
-        self.tray_icon    = pystray.Icon("condor", image, "CONDOR v5.0", menu)
+        self.tray_icon    = pystray.Icon("condor", image, "CONDOR v5.1", menu)
         self.tray_running = True
         threading.Thread(target=self._tray_loop, daemon=True).start()
 
@@ -230,20 +268,13 @@ class AutoBuilder:
     def _quit_app(self):
         self._save_config()
         self.stop_all = True
+        self.skip_current = True
         self._kill_process()
         self._stop_tray()
         shutil.rmtree(self.temp_dir, ignore_errors=True)
         self.root.destroy()
 
-    def _kill_process(self):
-        if self.active_process:
-            try:
-                self.active_process.kill()
-            except Exception:
-                pass
-            self.active_process = None
-
-    # ─── Node ───
+    # ─── Node ──────────────────────────────────────────────────────────────
 
     def _check_node(self):
         def run(cmd):
@@ -263,7 +294,7 @@ class AutoBuilder:
         return not any(
             norm == os.path.normpath(d).lower() for d in DANGEROUS_PATHS)
 
-    # ─── Keybindings ───
+    # ─── Keybindings ───────────────────────────────────────────────────────
 
     def _setup_keybindings(self):
         b = self.root.bind
@@ -274,7 +305,7 @@ class AutoBuilder:
         b("<Control-o>", lambda e: self.open_explorer())
         b("<Escape>",    lambda e: self.stop_execution())
 
-    # ─── DnD ───
+    # ─── DnD ───────────────────────────────────────────────────────────────
 
     def _setup_drag_drop(self):
         if not HAS_DND:
@@ -303,7 +334,7 @@ class AutoBuilder:
         else:
             self.log_msg(f"DROP: unsupported → {path}", "warn")
 
-    # ─── UI ───
+    # ─── UI ────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
         top = tk.Frame(self.root, bg="#161b22", padx=6, pady=4)
@@ -406,7 +437,7 @@ class AutoBuilder:
         tk.Label(status, text=f"{self.node_status} | {self.npm_status}",
             font=("Consolas", 7), fg="#30363d", bg="#161b22").pack(side="right", padx=4)
 
-        hint = "[X]=tray" if HAS_TRAY else ""
+        hint = "[X]=menu" if HAS_TRAY else ""
         tk.Label(status,
             text=f"Ctrl+V=paste  Ctrl+R=run  Esc=stop  {hint}",
             font=("Consolas", 7), fg="#21262d", bg="#161b22").pack(side="right", padx=8)
@@ -449,7 +480,7 @@ class AutoBuilder:
         widget.bind("<Enter>", enter)
         widget.bind("<Leave>", leave)
 
-    # ─── Progreso ───
+    # ─── Progreso ──────────────────────────────────────────────────────────
 
     def _update_progress(self, current: int, total: int):
         self.progress_bar.delete("all")
@@ -462,7 +493,7 @@ class AutoBuilder:
     def _reset_progress(self):
         self.progress_bar.delete("all")
 
-    # ─── Spinner ───
+    # ─── Spinner ───────────────────────────────────────────────────────────
 
     def start_spinner(self, text: str = "Processing"):
         self.spinner_running = True
@@ -481,7 +512,7 @@ class AutoBuilder:
         self.spinner_running = False
         self.status_label.config(text="Ready")
 
-    # ─── Log ───
+    # ─── Log ───────────────────────────────────────────────────────────────
 
     def log_msg(self, msg: str, tag: str = "white"):
         self.log.configure(state="normal")
@@ -499,20 +530,12 @@ class AutoBuilder:
         self.stats_label.config(text="")
         self._reset_progress()
 
-    # ─── Audio ───
+    # ─── Audio ─────────────────────────────────────────────────────────────
 
     def _beep(self, success: bool = True):
         try:
             winsound.MessageBeep(
                 winsound.MB_OK if success else winsound.MB_ICONHAND)
-        except Exception:
-            pass
-
-    def _beep_done(self):
-        try:
-            winsound.Beep(800, 200)
-            time.sleep(0.05)
-            winsound.Beep(1000, 200)
         except Exception:
             pass
 
@@ -523,7 +546,7 @@ class AutoBuilder:
             except Exception:
                 pass
 
-    # ─── Backup / Undo ───
+    # ─── Backup / Undo ─────────────────────────────────────────────────────
 
     def _backup(self, filepath: str):
         if not self.backup_enabled.get() or not os.path.exists(filepath):
@@ -549,7 +572,7 @@ class AutoBuilder:
         except Exception as e:
             self.log_msg(f"UNDO ERROR: {e}", "err")
 
-    # ─── Botones ───
+    # ─── Botones ───────────────────────────────────────────────────────────
 
     def select_folder(self):
         path = filedialog.askdirectory(title="Project root folder")
@@ -594,15 +617,21 @@ class AutoBuilder:
         self.log_msg("PROMPT copied to clipboard!", "ok")
 
     def skip_instruction(self):
+        """Salta la instrucción actual matando el proceso en curso."""
+        if not self.is_running:
+            return
         self.skip_current = True
+        self.log_msg(">> SKIPPING — killing process...", "warn")
         self._kill_process()
-        self.log_msg(">> SKIPPING...", "warn")
 
     def stop_execution(self):
+        """Detiene toda la ejecución matando el proceso en curso."""
+        if not self.is_running:
+            return
         self.stop_all     = True
         self.skip_current = True
+        self.log_msg(">> STOPPING — killing process...", "err")
         self._kill_process()
-        self.log_msg(">> STOPPING...", "err")
 
     def paste_from_clipboard(self):
         try:
@@ -623,7 +652,115 @@ class AutoBuilder:
         self.log_msg(f"PASTE: {len(clipboard)} chars", "ok")
         self.parse_md()
 
-    # ─── Parse ───
+    # ─── Editor de instrucciones ────────────────────────────────────────────
+
+    def _edit_instruction(self, index: int):
+        if index < 0 or index >= len(self.instructions):
+            return
+
+        inst = self.instructions[index]
+
+        win = tk.Toplevel(self.root)
+        win.title(f"Edit [{index+1}] {inst['action']} — {inst['filepath']}")
+        win.geometry("600x400")
+        win.configure(bg="#0d1117")
+        win.transient(self.root)
+        win.grab_set()
+
+        top = tk.Frame(win, bg="#161b22", padx=8, pady=6)
+        top.pack(fill="x")
+
+        tk.Label(top,
+            text=f"{inst['action']}  →  {inst['filepath']}",
+            font=("Consolas", 9, "bold"),
+            fg="#7c3aed", bg="#161b22").pack(side="left")
+
+        def save():
+            new_content = editor.get("1.0", "end-1c").strip()
+            self.instructions[index]["content"] = new_content
+            self.log_msg(f"  EDITED [{index+1}] {inst['filepath']}", "undo")
+            win.destroy()
+            self._display_instructions()
+
+        def cancel():
+            win.destroy()
+
+        def delete():
+            self.instructions.pop(index)
+            self.log_msg(f"  REMOVED [{index+1}] {inst['filepath']}", "warn")
+            win.destroy()
+            self._display_instructions()
+
+        ttk.Button(top, text="ELIMINAR", style="R.TButton",
+            command=delete).pack(side="right", padx=2)
+        ttk.Button(top, text="CANCELAR", style="W.TButton",
+            command=cancel).pack(side="right", padx=2)
+        ttk.Button(top, text="GUARDAR", style="G.TButton",
+            command=save).pack(side="right", padx=2)
+
+        editor = scrolledtext.ScrolledText(win,
+            font=("Consolas", 10), bg="#161b22", fg="#e2e8f0",
+            insertbackground="#7c3aed", relief="flat", bd=0,
+            wrap="none", padx=8, pady=8)
+        editor.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        editor.insert("1.0", inst["content"])
+        editor.focus_set()
+
+    def _on_log_double_click(self, event):
+        if self.is_running or not self.instructions:
+            return
+        index    = self.log.index(f"@{event.x},{event.y}")
+        line_num = int(index.split(".")[0])
+        self.log.configure(state="normal")
+        line_text = self.log.get(f"{line_num}.0", f"{line_num}.end").strip()
+        self.log.configure(state="disabled")
+        m = re.match(r'^\s*(\d+)\.', line_text)
+        if m:
+            inst_idx = int(m.group(1)) - 1
+            if 0 <= inst_idx < len(self.instructions):
+                self._edit_instruction(inst_idx)
+
+    def _display_instructions(self):
+        self.clear_log()
+        self.log_msg("=" * 50, "dim")
+        self.log_msg("INSTRUCTIONS — double-click to edit", "head")
+        self.log_msg("=" * 50, "dim")
+
+        if not self.instructions:
+            self.log_msg("No instructions", "warn")
+            self.run_btn.state(["disabled"])
+            return
+
+        counts: dict[str, int] = {}
+        for inst in self.instructions:
+            counts[inst["action"]] = counts.get(inst["action"], 0) + 1
+
+        self.log_msg(f"Found: {len(self.instructions)} instructions", "info")
+        for a, c in counts.items():
+            self.log_msg(f"  {a}: {c}", "info")
+        self.log_msg("")
+
+        for i, inst in enumerate(self.instructions):
+            a = inst["action"]
+            if a == "EJECUTAR":
+                preview = inst["content"].replace("\n", " | ")[:60]
+                self.log_msg(f"  {i+1:02d}. EXEC  {preview}...", "cmd")
+            elif a == "ELIMINAR":
+                self.log_msg(f"  {i+1:02d}. DEL   {inst['filepath']}", "warn")
+            elif a == "REEMPLAZAR":
+                self.log_msg(f"  {i+1:02d}. REPL  {inst['filepath']}", "replace")
+            else:
+                n   = inst["content"].count("\n") + 1
+                act = "NEW" if a == "CREAR" else "MOD"
+                self.log_msg(f"  {i+1:02d}. {act}   {inst['filepath']} ({n}L)", "cmd")
+
+        self.log_msg("")
+        self.log_msg("Double-click to edit. Press RUN to execute.", "ok")
+        self.stats_label.config(
+            text=" | ".join(f"{a}:{c}" for a, c in counts.items()))
+        self.run_btn.state(["!disabled"])
+
+    # ─── Parse ─────────────────────────────────────────────────────────────
 
     def parse_md(self):
         md_file = self.md_path.get()
@@ -638,79 +775,35 @@ class AutoBuilder:
             messagebox.showerror("Error", "Dangerous path!")
             return
 
-        self.clear_log()
-        self.log_msg("=" * 50, "dim")
-        self.log_msg("SCANNING .md", "head")
-        self.log_msg("=" * 50, "dim")
-
         try:
             with open(md_file, "r", encoding="utf-8") as f:
                 content = f.read()
         except Exception as e:
-            self.log_msg(f"Error: {e}", "err")
+            self.log_msg(f"Error reading file: {e}", "err")
             return
 
         self.instructions = self._extract(content)
+        self._display_instructions()
+        self.log.bind("<Double-Button-1>", self._on_log_double_click)
 
-        if not self.instructions:
-            self.log_msg("No ETIQUETA found", "warn")
-            self.run_btn.state(["disabled"])
-            return
-
-        counts: dict[str, int] = {}
-        for inst in self.instructions:
-            counts[inst["action"]] = counts.get(inst["action"], 0) + 1
-
-        self.log_msg(f"Found: {len(self.instructions)} instructions", "info")
-        for a, c in counts.items():
-            self.log_msg(f"  {a}: {c}", "info")
-        self.log_msg("")
-
-        for i, inst in enumerate(self.instructions, 1):
-            a = inst["action"]
-            if a == "EJECUTAR":
-                preview = inst["content"].replace("\n", " | ")[:60]
-                self.log_msg(f"  {i:02d}. EXEC  {preview}...", "cmd")
-            elif a == "ELIMINAR":
-                self.log_msg(f"  {i:02d}. DEL   {inst['filepath']}", "warn")
-            elif a == "REEMPLAZAR":
-                self.log_msg(f"  {i:02d}. REPL  {inst['filepath']}", "replace")
-            else:
-                n   = inst["content"].count("\n") + 1
-                act = "NEW" if a == "CREAR" else "MOD"
-                self.log_msg(f"  {i:02d}. {act}   {inst['filepath']} ({n}L)", "cmd")
-
-        self.log_msg("")
-        if self.dry_run.get():
-            self.log_msg("DRY-RUN mode: no changes will be made", "dry")
-        self.log_msg("Ready. Press RUN to execute.", "ok")
-        self.stats_label.config(
-            text=" | ".join(f"{a}:{c}" for a, c in counts.items()))
-        self.run_btn.state(["!disabled"])
-
-        if self.auto_run.get():
+        if self.auto_run.get() and self.instructions:
             self.run_all()
 
-    # ─── Extractor ───────────────────────────────────────────────────────────
+    # ─── Extractor ─────────────────────────────────────────────────────────
 
     def _extract(self, content: str) -> list:
         """
-        Parser para el formato B:
+        Parser formato B:
+            ETIQUETA[...]   ← fuera
+            INICIO_BLOQUE   ← fuera, ANTES del ```
+            ```ext          ← decoracion
+            contenido
+            ```             ← decoracion
+            FIN_BLOQUE      ← fuera, DESPUES del ```
 
-            ETIQUETA[...]       ← fuera
-            INICIO_BLOQUE       ← fuera, ANTES del ```
-            ```jsx              ← abre decoracion
-            contenido real
-            ```                 ← cierra decoracion
-            FIN_BLOQUE          ← fuera, DESPUES del ```
-
-        Algoritmo:
-        1. Busca ETIQUETA[...]
-        2. Busca INICIO_BLOQUE (saltando vacías, ignora ``` que encuentre)
-        3. Ignora el ``` de apertura si aparece después de INICIO_BLOQUE
-        4. Acumula contenido hasta encontrar FIN_BLOQUE en col 0
-        5. Al acumular, elimina fence lines (``` ```jsx etc.) del contenido
-        6. FIN_BLOQUE solo cierra si está en columna 0
+        Salta fence lines entre ETIQUETA e INICIO_BLOQUE.
+        Elimina fence lines del contenido acumulado.
+        FIN_BLOQUE solo cierra si está en columna 0.
         """
         instructions = []
         lines        = content.split("\n")
@@ -719,7 +812,6 @@ class AutoBuilder:
         while i < len(lines):
             stripped = lines[i].strip()
 
-            # Buscar ETIQUETA[...]
             m = re.match(r'^ETIQUETA\[([^\]]+)\]\s*$', stripped)
             if not m:
                 i += 1
@@ -735,34 +827,27 @@ class AutoBuilder:
                 i += 1
                 continue
 
-            # Buscar INICIO_BLOQUE saltando líneas vacías
-            # (ignorar cualquier ``` que aparezca entre ETIQUETA e INICIO_BLOQUE)
+            # Buscar INICIO_BLOQUE saltando vacías y fence lines decorativas
             j = i + 1
             while j < len(lines):
                 s = lines[j].strip()
-                if s == "":
-                    j += 1
-                    continue
-                if re.match(r'^`{3,}\w*\s*$', s):
-                    # fence line entre ETIQUETA e INICIO → ignorar
+                if s == "" or re.match(r'^`{3,}\w*\s*$', s):
                     j += 1
                     continue
                 break
 
             if j >= len(lines) or lines[j].strip() != "INICIO_BLOQUE":
                 self.log_msg(
-                    f"  WARN: ETIQUETA sin INICIO_BLOQUE → [{params_str}]", "warn")
+                    f"  WARN: sin INICIO_BLOQUE → [{params_str}]", "warn")
                 i += 1
                 continue
 
-            # Recopilar contenido desde después de INICIO_BLOQUE
-            # hasta FIN_BLOQUE en columna 0
+            # Acumular contenido hasta FIN_BLOQUE en columna 0
             k          = j + 1
             code_lines = []
             found      = False
 
             while k < len(lines):
-                # FIN_BLOQUE en col 0 → cierra el bloque
                 if lines[k].rstrip() == "FIN_BLOQUE":
                     found = True
                     break
@@ -775,14 +860,10 @@ class AutoBuilder:
                 i += 1
                 continue
 
-            # Limpiar fence lines del contenido acumulado
-            # (el ``` de apertura y cierre que estaban dentro)
-            final = [
-                cl for cl in code_lines
-                if not re.match(r'^\s*`{3,}\w*\s*$', cl)
-            ]
-
-            code = "\n".join(final).strip()
+            # Eliminar fence lines del contenido
+            final = [cl for cl in code_lines
+                     if not re.match(r'^\s*`{3,}\w*\s*$', cl)]
+            code  = "\n".join(final).strip()
 
             ubicacion, nombre, extension, accion = params
             accion = accion.upper().strip()
@@ -805,7 +886,7 @@ class AutoBuilder:
 
         return instructions
 
-    # ─── Ejecución ───
+    # ─── Ejecución ─────────────────────────────────────────────────────────
 
     def run_all(self):
         if self.is_running or not self.instructions:
@@ -815,8 +896,10 @@ class AutoBuilder:
                 f"{mode}: {len(self.instructions)} instructions\n"
                 f"Project: {self.project_path.get()}\n\nContinue?"):
             return
-        self.is_running = True
-        self.stop_all   = False
+
+        self.is_running   = True
+        self.stop_all     = False
+        self.skip_current = False
         self.run_btn.state(["disabled"])
         self.skip_btn.state(["!disabled"])
         self.stop_btn.state(["!disabled"])
@@ -838,6 +921,7 @@ class AutoBuilder:
                 self.log_msg(f"STOPPED at [{i}/{total}]", "err")
                 break
 
+            # Resetear skip solo al inicio de cada instrucción
             self.skip_current = False
             action            = inst["action"]
             self.spinner_text = f"[{i}/{total}] {action}"
@@ -874,8 +958,10 @@ class AutoBuilder:
                     self.log_msg(f"  Unknown action: {action}", "warn")
                     continue
 
-                skip += self.skip_current
-                ok   += not self.skip_current
+                if self.skip_current:
+                    skip += 1
+                else:
+                    ok += 1
 
             except Exception as e:
                 err += 1
@@ -900,13 +986,15 @@ class AutoBuilder:
         self.root.after(0, self._finish)
 
     def _finish(self):
-        self.is_running = False
+        self.is_running   = False
+        self.stop_all     = False
+        self.skip_current = False
         self.stop_spinner()
         self.run_btn.state(["!disabled"])
         self.skip_btn.state(["disabled"])
         self.stop_btn.state(["disabled"])
 
-    # ─── Archivos ───
+    # ─── Archivos ──────────────────────────────────────────────────────────
 
     def _create_file(self, project: str, inst: dict):
         filepath = inst["filepath"]
@@ -969,7 +1057,7 @@ class AutoBuilder:
             for idx in range(len(fc_str) - len(orig) + 1):
                 if ([norm(l) for l in fc_str[idx:idx+len(orig)]]
                         == [norm(l) for l in orig]):
-                    fc    = "\n".join(
+                    fc = "\n".join(
                         fc_ln[:idx] +
                         replace_text.split("\n") +
                         fc_ln[idx+len(orig):])
@@ -987,7 +1075,7 @@ class AutoBuilder:
         self.log_msg(f"    - {original_text.split(chr(10))[0][:50]}", "dim")
         self.log_msg(f"    + {replace_text.split(chr(10))[0][:50]}", "ok")
 
-    # ─── CMD ───
+    # ─── CMD ───────────────────────────────────────────────────────────────
 
     def _is_interactive(self, cmd: str) -> bool:
         c = cmd.lower().strip()
@@ -995,23 +1083,79 @@ class AutoBuilder:
                 c.startswith("python") or c.startswith("py ") or
                 c.startswith("node "))
 
+    def _normalize_create_cmd(self, cmd: str) -> str:
+        """
+        Convierte comandos de scaffolding a su forma silenciosa.
+        Maneja mayúsculas, variantes de npm/npx create/init.
+        """
+        c = cmd.lower().strip()
+
+        # Cualquier variante de crear proyecto vite
+        if any(x in c for x in [
+            "npm init vite", "npm create vite",
+            "npx create-vite", "npx init vite"
+        ]):
+            # Extraer template
+            template = "react"
+            if "--template" in c:
+                idx = c.index("--template")
+                rest = cmd[idx + len("--template"):].strip()
+                template = rest.split()[0] if rest.split() else "react"
+            return f"npx create-vite@latest . --template {template} --yes"
+
+        # Next.js
+        if "create-next-app" in c:
+            if "--yes" not in c and "-y" not in c:
+                return cmd + " --yes"
+            return cmd
+
+        return cmd
+
+    def _create_file(self, project: str, inst: dict):
+        filepath = inst["filepath"]
+        content  = inst["content"]
+        full     = os.path.join(project, filepath.replace("/", os.sep))
+        # Evitar error si dirname está vacío
+        dir_path = os.path.dirname(full)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+        with open(full, "w", encoding="utf-8") as f:
+            f.write(content + "\n")
+        n   = content.count("\n") + 1
+        act = "NEW" if inst["action"] == "CREAR" else "MOD"
+        self.log_msg(f"  {act}: {filepath} ({n}L)", "ok")
+
     def _exec_cmd(self, project: str, commands: str):
+        """
+        Ejecuta comandos línea por línea.
+        - CMD SEP: abre ventana separada con polling para SKIP/STOP
+        - Inline: Popen con readline en tiempo real para SKIP/STOP
+        """
         lines = [l.strip() for l in commands.strip().split("\n")
                  if l.strip() and not l.strip().startswith("#")]
 
         for cmd in lines:
-            if self.skip_current or self.stop_all:
+            # Verificar flags ANTES de procesar cada comando
+            if self.stop_all:
+                self.log_msg(f"  STOP: {cmd}", "err")
+                break
+            if self.skip_current:
                 self.log_msg(f"  SKIP: {cmd}", "warn")
                 continue
 
+            # Normalizar comando de scaffolding
+            cmd = self._normalize_create_cmd(cmd)
+
+            # ── CMD SEP ──────────────────────────────────────────────────
             if self.cmd_sep_var.get() and self._is_interactive(cmd):
                 self.log_msg(f"  [CMD SEP] {cmd}", "interactive")
                 try:
-                    self.active_process = subprocess.Popen(
+                    proc = subprocess.Popen(
                         f'start /wait cmd /k "'
                         f'title CONDOR: {cmd} && '
                         f'echo ======================================== && '
-                        f'echo  CONDOR: {cmd} && '
+                        f'echo  CONDOR ejecutando: && '
+                        f'echo  {cmd} && '
                         f'echo ======================================== && echo. && '
                         f'cd /d "{project}" && {cmd} && echo. && '
                         f'echo ======================================== && '
@@ -1019,79 +1163,94 @@ class AutoBuilder:
                         f'echo ========================================"',
                         shell=True, cwd=project)
 
-                    while self.active_process.poll() is None:
-                        if self.skip_current or self.stop_all:
+                    self._set_process(proc)
+
+                    # Polling con check de SKIP/STOP cada 200ms
+                    while proc.poll() is None:
+                        if self.stop_all or self.skip_current:
                             self._kill_process()
                             self.log_msg("  Process killed.", "warn")
                             break
-                        time.sleep(0.3)
+                        time.sleep(0.2)
+
+                    self._set_process(None)
 
                     if not self.skip_current and not self.stop_all:
                         self.log_msg("  Window closed. Continuing...", "ok")
-                        # Sin beep — el usuario pidió removerlo
-
-                    self.active_process = None
 
                 except Exception as e:
                     self.log_msg(f"  Error: {e}", "err")
-                    self.active_process = None
+                    self._set_process(None)
                 continue
 
+            # ── Inline con output en tiempo real ─────────────────────────
             self.log_msg(f"  > {cmd}", "cmd")
             self.spinner_text = cmd[:40]
 
             try:
-                self.active_process = subprocess.Popen(
+                proc = subprocess.Popen(
                     cmd, shell=True, cwd=project,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True, bufsize=1)
 
+                self._set_process(proc)
+
                 out_count = 0
+                # Leer stdout línea a línea en tiempo real
                 while True:
-                    if self.skip_current or self.stop_all:
+                    # Verificar SKIP/STOP antes de leer
+                    if self.stop_all or self.skip_current:
                         self._kill_process()
                         self.log_msg("    Process killed.", "warn")
                         break
-                    line = self.active_process.stdout.readline()
+
+                    line = proc.stdout.readline()
                     if line:
                         clean = line.rstrip()
                         if clean and out_count < 8:
                             self.log_msg(f"    {clean}", "info")
                             out_count += 1
-                    elif self.active_process.poll() is not None:
+                    elif proc.poll() is not None:
+                        # Proceso terminó
                         break
                     else:
                         time.sleep(0.05)
 
+                # Leer stderr y mostrar resultado solo si no fue cancelado
                 if not self.skip_current and not self.stop_all:
-                    stderr = self.active_process.stderr.read()
-                    rc     = self.active_process.returncode
+                    try:
+                        stderr = proc.stderr.read()
+                    except Exception:
+                        stderr = ""
+                    rc = proc.returncode if proc.returncode is not None else -1
+
                     if rc != 0 and stderr and stderr.strip():
                         tag = "warn" if ("warn" in stderr.lower()
                                          or "notice" in stderr.lower()) else "err"
                         for ln in stderr.strip().split("\n")[:4]:
                             self.log_msg(f"    {ln[:100]}", tag)
+
                     self.log_msg(
                         f"    {'OK' if rc == 0 else f'exit:{rc}'}",
                         "ok" if rc == 0 else "warn")
 
-                self.active_process = None
+                self._set_process(None)
 
             except Exception as e:
                 self.log_msg(f"    Error: {e}", "err")
-                self.active_process = None
+                self._set_process(None)
 
-    # ─── Entry point ───
+    # ─── Entry point ───────────────────────────────────────────────────────
 
     def run(self):
-        self.log_msg("CONDOR v5.0", "head")
+        self.log_msg("CONDOR v5.1", "head")
         self.log_msg(f"{self.node_status} | {self.npm_status}", "info")
         self.log_msg(
             "Ctrl+V=paste  Ctrl+R=run  Ctrl+S=scan  "
             "Ctrl+Z=undo  Ctrl+O=open  Esc=stop", "dim")
         self.log_msg(
-            "INICIO_BLOQUE antes del ```  —  FIN_BLOQUE despues del ```",
-            "block")
+            "ETIQUETA → INICIO_BLOQUE → ```contenido``` → FIN_BLOQUE", "block")
         if PROMPT_TEXT.startswith("Error:"):
             self.log_msg(PROMPT_TEXT, "err")
         self.log_msg("")
