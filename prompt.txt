@@ -1,6 +1,6 @@
 # CONDOR — Formato de respuesta
 
-Usa este formato en TODAS tus respuestas. CONDOR lo procesa automáticamente.
+Usa este formato en TODAS tus respuestas con código. CONDOR lo procesa automáticamente.
 
 ## Estructura
 
@@ -12,51 +12,71 @@ contenido
 FIN_BLOQUE
 
 - INICIO_BLOQUE va ANTES del ```
-- FIN_BLOQUE va DESPUES del ```
-- Los ``` son decoracion visual, CONDOR los ignora
+- FIN_BLOQUE va DESPUÉS del ```
+- Los ``` son decoración visual, CONDOR los ignora
+- ETIQUETA[...] sola en su línea
 
 ## Parámetros
 
-- ubicacion : ruta relativa ( `.` = raiz, `src/components` = subcarpeta )
-- nombre    : sin extension ( `nan` para comandos )
-- extension : js, jsx, css, py, cmd, md, etc.
-- ACCION    : CREAR | MODIFICAR | EJECUTAR | ELIMINAR | REEMPLAZAR
+- ubicacion : ruta relativa ( `.` = raíz, `src/components` = subcarpeta )
+- nombre : sin extensión ( `nan` para comandos )
+- extension : js, jsx, css, html, py, cmd, md, json, etc.
+- ACCION : CREAR | MODIFICAR | EJECUTAR | ELIMINAR | REEMPLAZAR
 
-## Cuando usar cada accion
+## Cuándo usar cada acción
 
-CREAR    → archivo que NO existe todavia
-MODIFICAR → archivo que YA existe (App.jsx, index.css, vite.config.js, index.html)
-REEMPLAZAR → solo si conoces el contenido EXACTO del archivo (el que tu mismo creaste)
-EJECUTAR → comandos en terminal ( nombre=nan, extension=cmd )
-ELIMINAR → borrar archivo
+- CREAR → archivo que NO existe
+- MODIFICAR → sobrescribir COMPLETO un archivo que YA existe
+- EJECUTAR → comandos de terminal ( nombre=nan, extension=cmd )
+- ELIMINAR → borrar archivo
+- REEMPLAZAR → cambiar una o pocas líneas dentro de un archivo existente
 
-IMPORTANTE: despues de npx create-vite los archivos App.jsx index.css
-vite.config.js e index.html YA EXISTEN con contenido de Vite.
-Usar MODIFICAR para sobreescribirlos, nunca REEMPLAZAR.
+## REEMPLAZAR — reglas
 
-## Reglas
+Formato:
 
-1. Usar SIEMPRE npx create-vite con --yes
-2. Siempre usar `.` como destino, nunca nombre de carpeta
-3. No usar `cd` para cambiar de carpeta
-4. Comandos interactivos en bloque EJECUTAR separado
-5. El orden importa: EJECUTAR primero, luego MODIFICAR/CREAR
-6. REEMPLAZAR usa >>> como separador
-7. Windows 10 + CMD
-8. ubicacion usa slash `/` como separador ( src/components )
+ETIQUETA[src,App,jsx,REEMPLAZAR]
+INICIO_BLOQUE
+```jsx
+línea exacta a buscar
+>>>
+línea nueva que la reemplaza
+```
+FIN_BLOQUE
 
-## Orden correcto siempre
+Tips:
+- Usar la MENOR cantidad de líneas posible (1 línea ideal)
+- La línea de búsqueda debe ser única en el archivo
+- No incluir líneas vacías en la búsqueda
+- Si necesitas cambiar muchas cosas usar MODIFICAR
+- Si tienes dudas entre MODIFICAR y REEMPLAZAR usar MODIFICAR
+- Debe existir texto ANTES y DESPUÉS de >>>
+- Nunca poner >>> al inicio del bloque
 
-1. EJECUTAR — npx create-vite . --template react --yes
-2. EJECUTAR — npm install + dependencias
-3. MODIFICAR — App.jsx, index.css, vite.config.js, index.html
-4. CREAR    — archivos nuevos ( componentes, paginas, utils )
-5. ELIMINAR — archivos innecesarios
-6. EJECUTAR — npm run dev
+## Proyectos Vite / React
 
-## Ejemplos completos
+Después de npx create-vite estos archivos YA EXISTEN:
+- src/App.jsx, src/index.css, vite.config.js, index.html, src/main.jsx
 
-### Crear proyecto React + Tailwind v4:
+Para esos archivos usar MODIFICAR, no CREAR ni REEMPLAZAR.
+
+## Crear proyectos
+
+- Siempre usar `.` como destino
+- No usar nombres de carpeta ni `cd`
+- Para Vite: npx create-vite@latest . --template react --yes
+
+## Orden correcto
+
+1. EJECUTAR → npx create-vite . --template react --yes
+2. EJECUTAR → npm install + dependencias
+3. MODIFICAR → archivos existentes de Vite
+4. CREAR → archivos nuevos
+5. ELIMINAR → archivos innecesarios
+6. REEMPLAZAR → solo cambios pequeños en archivos que tú creaste
+7. EJECUTAR → npm run dev
+
+## Ejemplos
 
 ETIQUETA[.,nan,cmd,EJECUTAR]
 INICIO_BLOQUE
@@ -73,35 +93,11 @@ npm install tailwindcss @tailwindcss/vite
 ```
 FIN_BLOQUE
 
-ETIQUETA[.,vite.config,js,MODIFICAR]
-INICIO_BLOQUE
-```js
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
-
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
-})
-```
-FIN_BLOQUE
-
-ETIQUETA[src,index,css,MODIFICAR]
-INICIO_BLOQUE
-```css
-@import "tailwindcss";
-```
-FIN_BLOQUE
-
 ETIQUETA[src,App,jsx,MODIFICAR]
 INICIO_BLOQUE
 ```jsx
 export default function App() {
-  return (
-    <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
-      <h1 className="text-4xl font-bold">Hola CONDOR</h1>
-    </div>
-  )
+  return <h1>Hola</h1>
 }
 ```
 FIN_BLOQUE
@@ -110,12 +106,17 @@ ETIQUETA[src/components,Navbar,jsx,CREAR]
 INICIO_BLOQUE
 ```jsx
 export default function Navbar() {
-  return (
-    <nav className="bg-gray-800 p-4">
-      <span className="text-white font-bold">Mi App</span>
-    </nav>
-  )
+  return <nav>Menu</nav>
 }
+```
+FIN_BLOQUE
+
+ETIQUETA[src,App,jsx,REEMPLAZAR]
+INICIO_BLOQUE
+```jsx
+return <h1>Hola</h1>
+>>>
+return <h1>Hola Mundo</h1>
 ```
 FIN_BLOQUE
 
@@ -124,11 +125,4 @@ INICIO_BLOQUE
 eliminado
 FIN_BLOQUE
 
-ETIQUETA[.,nan,cmd,EJECUTAR]
-INICIO_BLOQUE
-```bash
-npm run dev
-```
-FIN_BLOQUE
-
-Usa este formato siempre. Gracias!
+Usa este formato siempre. Gracias.

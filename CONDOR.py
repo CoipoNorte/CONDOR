@@ -1,3 +1,5 @@
+"""CONDOR v5.1"""
+
 import os
 import re
 import subprocess
@@ -32,24 +34,26 @@ DANGEROUS_PATHS = [
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".condor_config.json")
 
 
-def load_prompt() -> str:
+def _load_txt(filename: str) -> str:
+    """Busca un .txt junto al exe/script y lo devuelve como string."""
     candidates = []
     if getattr(sys, "frozen", False):
-        candidates.append(os.path.join(sys._MEIPASS, "prompt.txt"))
+        candidates.append(os.path.join(sys._MEIPASS, filename))
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    candidates.append(os.path.join(script_dir, "prompt.txt"))
-    candidates.append(os.path.join(os.getcwd(), "prompt.txt"))
+    candidates.append(os.path.join(script_dir, filename))
+    candidates.append(os.path.join(os.getcwd(), filename))
     for p in candidates:
         if os.path.isfile(p):
             try:
                 with open(p, "r", encoding="utf-8") as f:
                     return f.read()
             except Exception as e:
-                print(f"[CONDOR] Error leyendo prompt.txt: {e}")
-    return "Error: prompt.txt no encontrado junto a condor.py"
+                print(f"[CONDOR] Error leyendo {filename}: {e}")
+    return f"Error: {filename} no encontrado junto a condor.py"
 
 
-PROMPT_TEXT = load_prompt()
+PROMPT_TEXT = _load_txt("prompt.txt")
+MINIP_TEXT  = _load_txt("minip.txt")
 
 
 class AutoBuilder:
@@ -74,7 +78,6 @@ class AutoBuilder:
         self.backup_enabled = tk.BooleanVar(value=True)
         self.undo_stack     = []
 
-        # Proceso activo — clave para que SKIP y STOP funcionen
         self.active_process      = None
         self.active_process_lock = threading.Lock()
 
@@ -177,14 +180,12 @@ class AutoBuilder:
         self._save_config()
 
     # ─── Proceso activo ─────────────────────────────────────────────────────
-    # Usar lock para evitar condiciones de carrera entre hilos
 
     def _set_process(self, proc):
         with self.active_process_lock:
             self.active_process = proc
 
     def _kill_process(self):
-        """Mata el proceso activo de forma segura."""
         with self.active_process_lock:
             proc = self.active_process
             self.active_process = None
@@ -209,13 +210,9 @@ class AutoBuilder:
                 label="  Minimizar a bandeja  ",
                 command=self._hide_to_tray)
 
-        menu.add_command(
-            label="  Cerrar CONDOR  ",
-            command=self._quit_app)
+        menu.add_command(label="  Cerrar CONDOR  ", command=self._quit_app)
         menu.add_separator()
-        menu.add_command(
-            label="  Cancelar  ",
-            command=menu.destroy)
+        menu.add_command(label="  Cancelar  ", command=menu.destroy)
 
         x = self.root.winfo_x() + self.root.winfo_width() - 180
         y = self.root.winfo_y() + 30
@@ -267,7 +264,7 @@ class AutoBuilder:
 
     def _quit_app(self):
         self._save_config()
-        self.stop_all = True
+        self.stop_all     = True
         self.skip_current = True
         self._kill_process()
         self._stop_tray()
@@ -340,6 +337,7 @@ class AutoBuilder:
         top = tk.Frame(self.root, bg="#161b22", padx=6, pady=4)
         top.pack(fill="x")
 
+        # Fila paths
         paths = tk.Frame(top, bg="#161b22")
         paths.pack(fill="x", pady=1)
 
@@ -363,6 +361,7 @@ class AutoBuilder:
         ttk.Button(paths, text="..", style="C.TButton", width=2,
             command=self.select_md).pack(side="left", padx=1)
 
+        # Fila botones
         btns = tk.Frame(top, bg="#161b22")
         btns.pack(fill="x", pady=2)
 
@@ -401,6 +400,7 @@ class AutoBuilder:
         rb("OPEN",   "C.TButton", self.open_explorer, "Abrir en Explorer (Ctrl+O)")
         rb("CLR",    "P.TButton", self.clear_log,     "Limpiar log")
 
+        # Fila checkboxes
         opts = tk.Frame(top, bg="#161b22")
         opts.pack(fill="x", pady=1)
 
@@ -417,16 +417,19 @@ class AutoBuilder:
             fg="#64748b", bg="#161b22")
         self.stats_label.pack(side="right", padx=4)
 
+        # Barra de progreso
         self.progress_bar = tk.Canvas(self.root, height=3,
             bg="#161b22", highlightthickness=0)
         self.progress_bar.pack(fill="x")
 
+        # Log
         self.log = scrolledtext.ScrolledText(self.root,
             font=("Consolas", 9), bg="#0d1117", fg="#e2e8f0",
             insertbackground="#7c3aed", relief="flat", bd=0,
             wrap="word", state="disabled", padx=8, pady=4)
         self.log.pack(fill="both", expand=True)
 
+        # Barra de estado
         status = tk.Frame(self.root, bg="#161b22", height=18)
         status.pack(fill="x", side="bottom")
 
@@ -442,6 +445,18 @@ class AutoBuilder:
             text=f"Ctrl+V=paste  Ctrl+R=run  Esc=stop  {hint}",
             font=("Consolas", 7), fg="#21262d", bg="#161b22").pack(side="right", padx=8)
 
+        # ── Botón secreto P (mini prompt) ──────────────────────────────────
+        p_btn = tk.Label(status, text="p",
+            font=("Consolas", 7, "bold"),
+            fg="#21262d", bg="#161b22",
+            cursor="hand2", padx=6, pady=1)
+        p_btn.pack(side="right", padx=(0, 2))
+        p_btn.bind("<Button-1>", lambda e: self._copy_minip())
+        p_btn.bind("<Enter>",    lambda e: p_btn.config(fg="#7c3aed"))
+        p_btn.bind("<Leave>",    lambda e: p_btn.config(fg="#21262d"))
+        self._tip(p_btn, "Mini prompt compacto")
+
+        # Tags de color
         for tag, color, bold in [
             ("ok",          "#10b981", False),
             ("err",         "#ef4444", False),
@@ -616,21 +631,25 @@ class AutoBuilder:
         self.root.update()
         self.log_msg("PROMPT copied to clipboard!", "ok")
 
+    def _copy_minip(self):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(MINIP_TEXT)
+        self.root.update()
+        self.log_msg("Mini prompt copied!", "ok")
+
     def skip_instruction(self):
-        """Salta la instrucción actual matando el proceso en curso."""
         if not self.is_running:
             return
         self.skip_current = True
-        self.log_msg(">> SKIPPING — killing process...", "warn")
+        self.log_msg(">> SKIPPING...", "warn")
         self._kill_process()
 
     def stop_execution(self):
-        """Detiene toda la ejecución matando el proceso en curso."""
         if not self.is_running:
             return
         self.stop_all     = True
         self.skip_current = True
-        self.log_msg(">> STOPPING — killing process...", "err")
+        self.log_msg(">> STOPPING...", "err")
         self._kill_process()
 
     def paste_from_clipboard(self):
@@ -676,8 +695,7 @@ class AutoBuilder:
             fg="#7c3aed", bg="#161b22").pack(side="left")
 
         def save():
-            new_content = editor.get("1.0", "end-1c").strip()
-            self.instructions[index]["content"] = new_content
+            self.instructions[index]["content"] = editor.get("1.0", "end-1c").strip()
             self.log_msg(f"  EDITED [{index+1}] {inst['filepath']}", "undo")
             win.destroy()
             self._display_instructions()
@@ -793,17 +811,10 @@ class AutoBuilder:
 
     def _extract(self, content: str) -> list:
         """
-        Parser formato B:
-            ETIQUETA[...]   ← fuera
-            INICIO_BLOQUE   ← fuera, ANTES del ```
-            ```ext          ← decoracion
-            contenido
-            ```             ← decoracion
-            FIN_BLOQUE      ← fuera, DESPUES del ```
-
-        Salta fence lines entre ETIQUETA e INICIO_BLOQUE.
-        Elimina fence lines del contenido acumulado.
-        FIN_BLOQUE solo cierra si está en columna 0.
+        Parser INICIO_BLOQUE / FIN_BLOQUE.
+        - Salta fence lines entre ETIQUETA e INICIO_BLOQUE
+        - Elimina fence lines del contenido final
+        - FIN_BLOQUE solo cierra si está en columna 0
         """
         instructions = []
         lines        = content.split("\n")
@@ -827,7 +838,7 @@ class AutoBuilder:
                 i += 1
                 continue
 
-            # Buscar INICIO_BLOQUE saltando vacías y fence lines decorativas
+            # Buscar INICIO_BLOQUE saltando vacías y fence lines
             j = i + 1
             while j < len(lines):
                 s = lines[j].strip()
@@ -842,7 +853,7 @@ class AutoBuilder:
                 i += 1
                 continue
 
-            # Acumular contenido hasta FIN_BLOQUE en columna 0
+            # Acumular hasta FIN_BLOQUE en columna 0
             k          = j + 1
             code_lines = []
             found      = False
@@ -921,7 +932,6 @@ class AutoBuilder:
                 self.log_msg(f"STOPPED at [{i}/{total}]", "err")
                 break
 
-            # Resetear skip solo al inicio de cada instrucción
             self.skip_current = False
             action            = inst["action"]
             self.spinner_text = f"[{i}/{total}] {action}"
@@ -1000,7 +1010,9 @@ class AutoBuilder:
         filepath = inst["filepath"]
         content  = inst["content"]
         full     = os.path.join(project, filepath.replace("/", os.sep))
-        os.makedirs(os.path.dirname(full), exist_ok=True)
+        dir_path = os.path.dirname(full)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
         with open(full, "w", encoding="utf-8") as f:
             f.write(content + "\n")
         n   = content.count("\n") + 1
@@ -1028,52 +1040,114 @@ class AutoBuilder:
             self.log_msg("  REPL ERR: missing >>> separator", "err")
             return
 
-        parts         = content.split(">>>", 1)
-        original_text = parts[0].rstrip("\n")
-        replace_text  = parts[1].lstrip("\n")
+        parts     = content.split(">>>", 1)
+        search    = parts[0].rstrip("\n")
+        replace   = parts[1].lstrip("\n")
 
-        if not original_text.strip():
+        if not search.strip():
             self.log_msg("  REPL ERR: empty search text", "err")
             return
 
         with open(full, "r", encoding="utf-8") as f:
             fc = f.read()
 
+        # ── Intento 1: búsqueda exacta tal cual ──
+        if search in fc:
+            fc = fc.replace(search, replace, 1)
+            self._write_and_log(full, fc, filepath, search, replace)
+            return
+
+        # ── Intento 2: normalizar tabs → espacios ──
         def norm(t):
             return t.replace("\t", "    ")
 
         nfc = norm(fc)
-        nsr = norm(original_text)
+        nsr = norm(search)
 
         if nsr in nfc:
-            fc = nfc.replace(nsr, replace_text, 1)
-        elif original_text in fc:
-            fc = fc.replace(original_text, replace_text, 1)
-        else:
-            orig   = [l.rstrip() for l in original_text.split("\n")]
-            fc_ln  = fc.split("\n")
-            fc_str = [l.rstrip() for l in fc_ln]
-            found  = False
-            for idx in range(len(fc_str) - len(orig) + 1):
-                if ([norm(l) for l in fc_str[idx:idx+len(orig)]]
-                        == [norm(l) for l in orig]):
-                    fc = "\n".join(
-                        fc_ln[:idx] +
-                        replace_text.split("\n") +
-                        fc_ln[idx+len(orig):])
+            fc = nfc.replace(nsr, replace, 1)
+            self._write_and_log(full, fc, filepath, search, replace)
+            return
+
+        # ── Intento 3: búsqueda línea por línea con strip ──
+        search_lines = [l.strip() for l in search.split("\n") if l.strip()]
+        fc_lines     = fc.split("\n")
+
+        if len(search_lines) == 0:
+            self.log_msg("  REPL ERR: empty search text", "err")
+            return
+
+        # Buscar la primera línea del search en el archivo
+        found = False
+        for start_idx in range(len(fc_lines)):
+            # Verificar si desde start_idx coinciden todas las líneas del search
+            if fc_lines[start_idx].strip() == search_lines[0]:
+                # Una sola línea de búsqueda
+                if len(search_lines) == 1:
+                    replace_lines = replace.split("\n")
+                    fc_lines = fc_lines[:start_idx] + replace_lines + fc_lines[start_idx + 1:]
                     found = True
                     break
-            if not found:
-                self.log_msg(f"  REPL ERR: text not found in {filepath}", "err")
-                self.log_msg(f"    search: {original_text[:60]}...", "dim")
-                return
 
+                # Múltiples líneas: verificar que todas coincidan
+                match = True
+                matched = 0
+                fi = start_idx
+
+                for si in range(len(search_lines)):
+                    # Avanzar en fc saltando líneas vacías
+                    while fi < len(fc_lines) and fc_lines[fi].strip() == "" and search_lines[si] != "":
+                        fi += 1
+
+                    if fi >= len(fc_lines):
+                        match = False
+                        break
+
+                    if fc_lines[fi].strip() != search_lines[si]:
+                        match = False
+                        break
+
+                    fi += 1
+                    matched += 1
+
+                if match and matched == len(search_lines):
+                    # Encontrado: reemplazar desde start_idx hasta fi
+                    replace_lines = replace.split("\n")
+                    fc_lines = fc_lines[:start_idx] + replace_lines + fc_lines[fi:]
+                    found = True
+                    break
+
+        if found:
+            fc = "\n".join(fc_lines)
+            self._write_and_log(full, fc, filepath, search, replace)
+            return
+
+        # ── Intento 4: búsqueda parcial de la primera línea ──
+        first_search = search_lines[0]
+        for idx, line in enumerate(fc_lines):
+            if first_search in line.strip() or line.strip() in first_search:
+                if len(first_search) >= 5 and len(line.strip()) >= 5:
+                    # Match parcial de una línea
+                    if len(search_lines) == 1:
+                        replace_lines = replace.split("\n")
+                        fc_lines = fc_lines[:idx] + replace_lines + fc_lines[idx + 1:]
+                        fc = "\n".join(fc_lines)
+                        self._write_and_log(full, fc, filepath, search, replace)
+                        self.log_msg("    (partial match)", "warn")
+                        return
+
+        # ── Nada funcionó ──
+        self.log_msg(f"  REPL ERR: text not found in {filepath}", "err")
+        self.log_msg(f"    search: {search.split(chr(10))[0][:60]}...", "dim")
+
+    def _write_and_log(self, full: str, content: str, filepath: str,
+                       search: str, replace: str):
+        """Escribe el archivo y muestra el resultado en el log."""
         with open(full, "w", encoding="utf-8") as f:
-            f.write(fc)
-
+            f.write(content)
         self.log_msg(f"  REPL: {filepath}", "replace")
-        self.log_msg(f"    - {original_text.split(chr(10))[0][:50]}", "dim")
-        self.log_msg(f"    + {replace_text.split(chr(10))[0][:50]}", "ok")
+        self.log_msg(f"    - {search.split(chr(10))[0][:50]}", "dim")
+        self.log_msg(f"    + {replace.split(chr(10))[0][:50]}", "ok")
 
     # ─── CMD ───────────────────────────────────────────────────────────────
 
@@ -1084,58 +1158,30 @@ class AutoBuilder:
                 c.startswith("node "))
 
     def _normalize_create_cmd(self, cmd: str) -> str:
-        """
-        Convierte comandos de scaffolding a su forma silenciosa.
-        Maneja mayúsculas, variantes de npm/npx create/init.
-        """
+        """Convierte variantes de create vite a la forma silenciosa."""
         c = cmd.lower().strip()
-
-        # Cualquier variante de crear proyecto vite
         if any(x in c for x in [
             "npm init vite", "npm create vite",
             "npx create-vite", "npx init vite"
         ]):
-            # Extraer template
             template = "react"
             if "--template" in c:
-                idx = c.index("--template")
+                idx  = c.index("--template")
                 rest = cmd[idx + len("--template"):].strip()
                 template = rest.split()[0] if rest.split() else "react"
             return f"npx create-vite@latest . --template {template} --yes"
 
-        # Next.js
         if "create-next-app" in c:
             if "--yes" not in c and "-y" not in c:
                 return cmd + " --yes"
-            return cmd
 
         return cmd
 
-    def _create_file(self, project: str, inst: dict):
-        filepath = inst["filepath"]
-        content  = inst["content"]
-        full     = os.path.join(project, filepath.replace("/", os.sep))
-        # Evitar error si dirname está vacío
-        dir_path = os.path.dirname(full)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
-        with open(full, "w", encoding="utf-8") as f:
-            f.write(content + "\n")
-        n   = content.count("\n") + 1
-        act = "NEW" if inst["action"] == "CREAR" else "MOD"
-        self.log_msg(f"  {act}: {filepath} ({n}L)", "ok")
-
     def _exec_cmd(self, project: str, commands: str):
-        """
-        Ejecuta comandos línea por línea.
-        - CMD SEP: abre ventana separada con polling para SKIP/STOP
-        - Inline: Popen con readline en tiempo real para SKIP/STOP
-        """
         lines = [l.strip() for l in commands.strip().split("\n")
                  if l.strip() and not l.strip().startswith("#")]
 
         for cmd in lines:
-            # Verificar flags ANTES de procesar cada comando
             if self.stop_all:
                 self.log_msg(f"  STOP: {cmd}", "err")
                 break
@@ -1143,10 +1189,9 @@ class AutoBuilder:
                 self.log_msg(f"  SKIP: {cmd}", "warn")
                 continue
 
-            # Normalizar comando de scaffolding
             cmd = self._normalize_create_cmd(cmd)
 
-            # ── CMD SEP ──────────────────────────────────────────────────
+            # CMD SEP
             if self.cmd_sep_var.get() and self._is_interactive(cmd):
                 self.log_msg(f"  [CMD SEP] {cmd}", "interactive")
                 try:
@@ -1165,7 +1210,6 @@ class AutoBuilder:
 
                     self._set_process(proc)
 
-                    # Polling con check de SKIP/STOP cada 200ms
                     while proc.poll() is None:
                         if self.stop_all or self.skip_current:
                             self._kill_process()
@@ -1183,7 +1227,7 @@ class AutoBuilder:
                     self._set_process(None)
                 continue
 
-            # ── Inline con output en tiempo real ─────────────────────────
+            # Inline
             self.log_msg(f"  > {cmd}", "cmd")
             self.spinner_text = cmd[:40]
 
@@ -1197,9 +1241,7 @@ class AutoBuilder:
                 self._set_process(proc)
 
                 out_count = 0
-                # Leer stdout línea a línea en tiempo real
                 while True:
-                    # Verificar SKIP/STOP antes de leer
                     if self.stop_all or self.skip_current:
                         self._kill_process()
                         self.log_msg("    Process killed.", "warn")
@@ -1212,12 +1254,10 @@ class AutoBuilder:
                             self.log_msg(f"    {clean}", "info")
                             out_count += 1
                     elif proc.poll() is not None:
-                        # Proceso terminó
                         break
                     else:
                         time.sleep(0.05)
 
-                # Leer stderr y mostrar resultado solo si no fue cancelado
                 if not self.skip_current and not self.stop_all:
                     try:
                         stderr = proc.stderr.read()
