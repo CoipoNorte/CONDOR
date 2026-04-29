@@ -1,4 +1,4 @@
-# CONDOR v5.0
+# Condor
 
 Automatizador de proyectos desde archivos .md — Un puente entre tu IA y tu proyecto real.
 
